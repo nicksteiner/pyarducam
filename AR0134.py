@@ -172,7 +172,7 @@ def readThread(threadName,read_Flag):
 	while flag:
 		if ArducamSDK.Py_ArduCam_availiable(handle) > 0:
 
-			res,data = ArducamSDK.Py_ArduCam_read(handle,Width * Height)
+			res, data = ArducamSDK.Py_ArduCam_read(handle, Width * Height)
 			if res == 0:
 				count += 1
 				time1 = time.time()

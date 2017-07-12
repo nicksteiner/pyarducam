@@ -7,6 +7,9 @@ class CAM(object):
     success = 0
     failure = 1
 
+    def __init__(self, nCam=0):
+        self.nCam = nCam
+
     @property
     def cfg(self):
         return {"u32CameraType": self.CAMERA_,
