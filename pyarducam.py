@@ -11,12 +11,13 @@ def main():
     transfer_lock = capture.mp.Lock()
     # start writer
     queue = capture.mp.Queue()
-    writer = capture.Writer(queue, 'raw')
+    writer = capture.Writer(queue, 'tif')
 
 
     #start transfer
     transfer = capture.Transfer(cam, handle, transfer_lock, queue)
     transfer.start()
+    time.sleep(1)
     writer.start()
 
     transfer.join()

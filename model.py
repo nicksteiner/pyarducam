@@ -1,4 +1,4 @@
-
+import cv2
 
 import ArducamSDK
 
@@ -28,8 +28,7 @@ class CAM(object):
             regNum = regNum + 1
 
 class MT9N001(CAM):
-    #COLOR_BYTE2RGB = 49
-    COLOR_BYTE2RGB = 49 # cv2.COLOR_BAYER_GB2RGB
+    COLOR_BYTE2RGB = 46 # cv2.COLOR_BAYER_RG2RGB
     CAMERA_ = 0x4D091031
     SensorShipAddr = 32
     I2C_MODE_16_16 = 3

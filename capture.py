@@ -15,9 +15,11 @@ from model import AR0134, MT9N001
 
 import ArducamSDK
 
+_PATH = os.path.dirname(os.path.realpath(__file__))
+
 def convert_raw(cam, file_name, format_):
     with open(file_name, 'rb') as f:
-        data = f.read()
+        data = f.read()[::-1]
     image = Image.frombuffer("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1)
     img = np.array(image)
     img2 = cv2.cvtColor(img, cam.COLOR_BYTE2RGB)
@@ -51,13 +53,13 @@ def cam_close(cam, handle):
         raise
     return handle
 
+
 def cam_read(cam, handle):
     count = 0
     time0 = time.time()
     time1 = time.time()
     data = {}
     if ArducamSDK.Py_ArduCam_availiable(handle) > 0:
-
         res, data = ArducamSDK.Py_ArduCam_read(handle, cam.Width * cam.Height)
         if res == 0:
             count += 1
@@ -65,7 +67,6 @@ def cam_read(cam, handle):
             ArducamSDK.Py_ArduCam_del(handle)
         else:
             print("read data fail!")
-
     else:
         print("is not availiable")
 
@@ -77,19 +78,19 @@ def cam_read(cam, handle):
         return data
     else:
         print("data length is not enough!")
-    data
+    return Image.frombuffer("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1)
 
 def get_file_name(format_='tif', nCam=0):
     time_ = datetime.datetime.now().strftime('%Y%m%dT%H%M%S%fZ')
-    return os.path.join('dat', 'img_{}_cam{}.{}'.format( time_,nCam, format_))
+    fname = 'img_{}_cam{}.{}'.format( time_,nCam, format_)
+    return os.path.join(_PATH, 'dat', fname)
 
-def cam_write(cam, data, format_='raw', nCam=0):
+def cam_write(cam, image, format_='raw', nCam=0):
     file_name = get_file_name(format_, nCam)
     if format_ == 'raw':
         with open(file_name, 'wb') as f:
-            f.write(data)
+            f.write(image)
     else:
-        image = Image.frombuffer("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1)
         img = np.array(image)
         img2 = cv2.cvtColor(img, cam.COLOR_BYTE2RGB)
         cv2.imwrite(file_name, img2)
@@ -140,9 +141,6 @@ class Writer(mp.Process):
         while True:
             print('Writer Trying')
             cam, data = self.queue.get()
-            #if data is None:
-            #    break
-            #else:
             cam_write(cam, data, self.format)
 
 class Transfer(mp.Process):
@@ -163,19 +161,14 @@ class Transfer(mp.Process):
             print('Transfer Trying')
             print('Got my lock')
             assert ArducamSDK.Py_ArduCam_capture(self.handle) == self.cam.success
-            avail_ = ArducamSDK.Py_ArduCam_availiable(self.handle)
-            print(avail_)
-            if avail_ > 0: # available ?
-                self.transfer_lock.acquire()
-                data = cam_read(self.cam, self.handle)
-                self.ct += 1
-                print('Transfer Done')
-                tm_ = time.time() - self.time
-                self.transfer_lock.release()
-                print('CAM{} FPS: {:g}'.format(self.cam.nCam, tm_ / self.ct))
-                self.write_queue.put((self.cam, data))
-            else:
-                print('Errors oh my')
+            self.transfer_lock.acquire()
+            data = cam_read(self.cam, self.handle)
+            self.ct += 1
+            print('Transfer Done')
+            tm_ = time.time() - self.time
+            self.transfer_lock.release()
+            print('CAM{} FPS: {:g}'.format(self.cam.nCam, tm_ / self.ct))
+            self.write_queue.put((self.cam, data))
 
 
 def trigger_cam(cam, handle):
@@ -194,23 +187,28 @@ def init_proc(l):
     global lock
     lock = l
 
-def capture(nCam, model=MT9N001, nCapture=20, format_='raw'):
+def capture(nCam, model=MT9N001, nCapture=1, format_='raw', lock=None):
     cam, handle = init_cam(nCam, model)
     for n in range(nCapture):
-        lock.acquire()
+        if lock:
+            lock.acquire()
         data = trigger_cam(cam, handle)
-        print(time.time() - time_),
+        #print(time.time() - time_),
         print('_CAM{}'.format(nCam))
-        lock.release()
+        if lock:
+            lock.release()
         cam_write(cam, data, format_, nCam)
     cam_close(cam, handle)
 
 def main():
-    lock_ = mp.Lock()
-    global time_
-    time_ = time.time()
-    pool = mp.Pool(1, initializer=init_proc, initargs=(lock_, ))
-    pool.map(capture, [0])
+
+    capture(0)
+    #lock_ = mp.Lock()
+    #global time_
+    #time_ = time.time()
+
+    #pool = mp.Pool(1, initializer=init_proc, initargs=(lock_, ))
+    #pool.map(capture, [0])
 
 if __name__ == '__main__':
     sys.exit(main())
