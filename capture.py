@@ -43,6 +43,8 @@ def cam_begin(cam, handle):
     return res
 
 def cam_close(cam, handle):
+    ArducamSDK.Py_ArduCam_del(handle)
+    res = ArducamSDK.Py_ArduCam_endCapture(handle)
     res = ArducamSDK.Py_ArduCam_close(handle)
     try:
         assert res == cam.success
@@ -55,37 +57,39 @@ def cam_close(cam, handle):
 
 
 def cam_read(cam, handle):
-    count = 0
-    time0 = time.time()
-    time1 = time.time()
-    data = {}
-    if ArducamSDK.Py_ArduCam_availiable(handle) > 0:
-        res, data = ArducamSDK.Py_ArduCam_read(handle, cam.Width * cam.Height)
-        if res == 0:
-            count += 1
-            time1 = time.time()
-            ArducamSDK.Py_ArduCam_del(handle)
-        else:
-            print("read data fail!")
-    else:
-        print("is not availiable")
+    # check data ready
+    """
 
-    if len(data) >= cam.Width * cam.Height:
-        if time1 - time0 >= 1:
-            print("fps: {} /s\n".format(count))
-            count = 0
-            time0 = time1
-        return data
-    else:
-        print("data length is not enough!")
-    return Image.frombuffer("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1)
+    :param cam: <Cam> Class object
+    :param handle: handle to camera
+    :return:
+    """
+    try:
+        assert ArducamSDK.Py_ArduCam_availiable(handle) > 0
+        res, data = ArducamSDK.Py_ArduCam_read(handle, cam.Width * cam.Height)
+    except Exception as error:
+        raise
+    # check data good
+    try:
+        assert len(data) >= cam.Width * cam.Height
+        #ArducamSDK.Py_ArduCam_del(handle)
+    except Exception as error:
+        raise
+    return Image.frombuffer("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1).tostring()
 
 def get_file_name(format_='tif', nCam=0):
+    """
+
+    :param format_: format file extension
+    :param nCam: cam position
+    :return: path to image-file
+    """
     time_ = datetime.datetime.now().strftime('%Y%m%dT%H%M%S%fZ')
     fname = 'img_{}_cam{}.{}'.format( time_,nCam, format_)
     return os.path.join(_PATH, 'dat', fname)
 
-def cam_write(cam, image, format_='raw', nCam=0):
+def cam_write(cam, data, format_='raw', nCam=0):
+    image = Image.fromstring("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1)
     file_name = get_file_name(format_, nCam)
     if format_ == 'raw':
         with open(file_name, 'wb') as f:
@@ -106,69 +110,56 @@ def init_cam(nCam, model=AR0134):
 
 # Threading
 
-class Trigger(mp.Process):
-
-    def __init__(self, cam, handle, transfer_lock):
-        self.lock = mp.Lock()
-        self.transfer_lock = transfer_lock
-        self.cam = cam
-        self.handle = handle
-        #self.daemon = False
-        self.ct = 1
-
-        super(Trigger, self).__init__()
-
-    def run(self):
-        #print(self.handle)
-        while True:
-            print('Trying Trigger'),
-            #self.transfer_lock.acquire()
-            #if ArducamSDK.Py_ArduCam_beginCapture(self.handle) == self.cam.success:
-            assert ArducamSDK.Py_ArduCam_capture(self.handle) == self.cam.success
-            print(', Triggered')
-            self.ct += 1
-            #self.transfer_lock.release()
-
 class Writer(mp.Process):
 
     def __init__(self, queue, format):
+        self.exit = mp.Event()
         self.queue = queue
         self.format = format
-        #self.daemon = False
         super(Writer, self).__init__()
 
     def run(self):
-        while True:
-            print('Writer Trying')
+        #while True:
+        while not self.exit.is_set():
             cam, data = self.queue.get()
+            if cam is None:
+                print('Stopping Writer: {}'.format(self.pid))
+                break
             cam_write(cam, data, self.format)
+
+    def stop(self):
+        print('Stopping Writer: {}'.format(self.pid))
+        self.exit.set()
+
 
 class Transfer(mp.Process):
 
-    def __init__(self, cam, handle, transfer_lock, write_queue):
+    def __init__(self, cam, handle, transfer_lock, write_queue, ct):
+        self.exit = mp.Event()
         self.transfer_lock = transfer_lock
         self.cam = cam
         self.write_queue = write_queue
         self.handle = handle
-        self.ct = 0
+        self.ct = ct
         self.time = time.time()
-        #self.daemon = False
-
         super(Transfer, self).__init__()
 
     def run(self):
-        while True:
-            print('Transfer Trying')
-            print('Got my lock')
+        while not self.exit.is_set():
+
             assert ArducamSDK.Py_ArduCam_capture(self.handle) == self.cam.success
-            self.transfer_lock.acquire()
-            data = cam_read(self.cam, self.handle)
-            self.ct += 1
-            print('Transfer Done')
-            tm_ = time.time() - self.time
-            self.transfer_lock.release()
-            print('CAM{} FPS: {:g}'.format(self.cam.nCam, tm_ / self.ct))
+            with self.transfer_lock:
+                data = cam_read(self.cam, self.handle)
+                self.ct += 1
+                print('Transfer Done')
+                tm_ = time.time() - self.time
+                print(tm_)
+            print('CAM{}; Frame: {}; Elapsed: {}, FPS: {:g}'.format(self.cam.nCam, self.ct, tm_, self.ct / tm_))
             self.write_queue.put((self.cam, data))
+
+    def stop(self):
+        print('Stopping Transfer: {}'.format(self.pid))
+        self.exit.set()
 
 
 def trigger_cam(cam, handle):
@@ -201,14 +192,7 @@ def capture(nCam, model=MT9N001, nCapture=1, format_='raw', lock=None):
     cam_close(cam, handle)
 
 def main():
-
     capture(0)
-    #lock_ = mp.Lock()
-    #global time_
-    #time_ = time.time()
-
-    #pool = mp.Pool(1, initializer=init_proc, initargs=(lock_, ))
-    #pool.map(capture, [0])
 
 if __name__ == '__main__':
     sys.exit(main())
