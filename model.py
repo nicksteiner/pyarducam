@@ -1,6 +1,5 @@
-import cv2
-
 import ArducamSDK
+#import ArducamSDK_raspi
 
 class CAM(object):
 
@@ -74,7 +73,7 @@ class MT9N001(CAM):
 
 class AR0134(CAM):
     #COLOR_BYTE2RGB = 48
-    COLOR_BYTE2RGB = 48 #  cv2.COLOR_BAYER_BG2RGB
+    COLOR_BYTE2RGB = 47 #  cv2.COLOR_BAYER_BG2RGB
     CAMERA_ = 0x4D091031
     SensorShipAddr = 32
     I2C_MODE_16_16 = 3
@@ -86,7 +85,7 @@ class AR0134(CAM):
         # //[PLL_settings]
         [0x3028, 0x0010],  # //ROW_SPEED = 16
         [0x302A, 0x0010],  # //VT_PIX_CLK_DIV = 16
-        [0x302C, 0x0001],  # //VT_SYS_CLK_DIV = 1
+        [0x302C, 0x0002],  # //VT_SYS_CLK_DIV = 1
         [0x302E, 0x0002],  # //PRE_PLL_CLK_DIV = 2
         [0x3030, 0x0028],  # //PLL_MULTIPLIER = 40
         [0x3032, 0x0000],  # //DIGITAL_BINNING = 0
@@ -133,3 +132,15 @@ class AR0134(CAM):
 
         [0xffff, 0xffff],
         [0xffff, 0xffff]]
+
+
+_model = {'MT9N001': MT9N001,
+          'AR0134': AR0134}
+
+def get_model(model_str):
+    try:
+        model_obj = _model[model_str.upper()]
+    except Exception as err:
+        err('Model {} not found !!'.format(model_str))
+        raise
+    return model_obj
