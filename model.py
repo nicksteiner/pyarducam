@@ -27,6 +27,7 @@ class CAM(object):
             regNum = regNum + 1
 
 class MT9N001(CAM):
+    name = 'MT9N001'
     COLOR_BYTE2RGB = 46 # cv2.COLOR_BAYER_RG2RGB
     CAMERA_ = 0x4D091031
     SensorShipAddr = 32
@@ -72,6 +73,8 @@ class MT9N001(CAM):
     ]
 
 class AR0134(CAM):
+    name = 'AR0134'
+
     #COLOR_BYTE2RGB = 48
     COLOR_BYTE2RGB = 47 #  cv2.COLOR_BAYER_BG2RGB
     CAMERA_ = 0x4D091031

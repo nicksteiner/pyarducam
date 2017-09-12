@@ -20,6 +20,20 @@ import ArducamSDK
 _PATH = os.path.dirname(os.path.realpath(__file__))
 RUN_PATH = os.path.join(_PATH, 'running.info')
 
+
+def set_dirs():
+    parse_ = lambda x: os.path.basename(x).replace('flt_', '')
+    current_int = max(
+        [int(parse_(fld)) for fld, _, _ in os.walk(os.path.join(_PATH, 'dat', '.')) if parse_(fld) != '.'] + [0]) + 1
+    # current_int = max([os.path.basename(fld)for fld, _, _ in os.walk(os.path.join(_PATH, 'dat', '.'))] + [0]) + 1
+    current_path = os.path.join(_PATH, 'dat', 'flt_{:05d}'.format(current_int))
+    print(current_path)
+    try:
+        os.makedirs(current_path)
+    except:
+        pass
+    return current_path
+
 def convert_raw(cam, file_name, format_):
     with open(file_name, 'rb') as f:
         data = f.read()[::-1]
@@ -88,7 +102,7 @@ def cam_read(cam, handle):
         raise
     return Image.frombuffer("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1).tostring()
 
-def get_file_name(format_='tif', nCam=0):
+def get_file_name(current_path, format_='tif', nCam=0):
     """
 
     :param format_: format file extension
@@ -97,11 +111,11 @@ def get_file_name(format_='tif', nCam=0):
     """
     time_ = datetime.datetime.now().strftime('%Y%m%dT%H%M%S%fZ')
     fname = 'img_{}_cam{}.{}'.format( time_,nCam, format_)
-    return os.path.join(_PATH, 'dat', fname)
+    return os.path.join(current_path, fname)
 
-def cam_write(cam, data, format_='npy', nCam=0):
+def cam_write(cam, data, current_path, format_='npy', nCam=0, ):
     image = Image.fromstring("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1)
-    file_name = get_file_name(format_, nCam)
+    file_name = get_file_name(current_path, format_, nCam)
     img = np.array(image)
     if format_ == 'npy':
         np.save(file_name, image)
@@ -123,7 +137,8 @@ def init_cam(nCam, model_str='AR0134'):
 
 class Writer(mp.Process):
 
-    def __init__(self, queue, format):
+    def __init__(self, queue, format, current_path):
+        self.current_path = current_path
         self.exit = mp.Event()
         self.queue = queue
         self.format = format
@@ -133,11 +148,13 @@ class Writer(mp.Process):
         #while True:
         print('Writer Running: {}'.format(self.pid))
         while not self.exit.is_set():
-            cam, data = self.queue.get()
+            cam, data, ct = self.queue.get()
+
             if cam is None:
                 print('Stopping Writer: {}'.format(self.pid))
                 break
-            cam_write(cam, data, self.format)
+            print('NCapture: {}'.format(ct))
+            cam_write(cam, data, self.current_path, format_=self.format)
 
     def stop(self):
         print('Stopping Writer: {}'.format(self.pid))
@@ -160,21 +177,30 @@ class Transfer(mp.Process):
     def run(self):
         print('CAM{}; running'),
         while not self.exit.is_set():
-            print('CAM{}; waiting for capture'),
+            #self.handle = init_cam(self.cam.nCam, model_str=self.cam.name)
+            try:
+                assert cam_begin(self.cam, self.handle) == self.cam.success
+            except:
+                print('Cam Failed to Begin!!')
+                raise
+
+            print('CAM{}; waiting for capture'.format(self.cam.nCam)),
 
             assert ArducamSDK.Py_ArduCam_capture(self.handle) == self.cam.success
-            print('CAM{}; waiting for lock'),
+            print('CAM{}; waiting for lock'.format(self.cam.nCam)),
 
             with self.transfer_lock:
-                print('CAM{}; got lock')
+                print('CAM{}; got lock'.format(self.cam.nCam))
 
                 data = cam_read(self.cam, self.handle)
                 self.ct += 1
                 print('Transfer Done')
                 tm_ = time.time() - self.time
                 print(tm_)
+                res = ArducamSDK.Py_ArduCam_endCapture(self.handle)
+                res = ArducamSDK.Py_ArduCam_del(self.handle)
             print('CAM{}; Frame: {}; Elapsed: {}, FPS: {:g}, CNT: {}'.format(self.cam.nCam, self.ct, tm_, self.ct / tm_, self.ct))
-            self.write_queue.put((self.cam, data))
+            self.write_queue.put((self.cam, data, self.ct))
             # stop all
             if (self.ct >= self.max) & (self.max != 0):
                 print('Stopping Transfer: {}'.format(self.pid))
@@ -202,7 +228,9 @@ def init_proc(l):
     global lock
     lock = l
 
-def capture(nCam, model=MT9N001, nCapture=1, format_='raw', lock=None):
+def capture(nCam, model=MT9N001, nCapture=1, format_='raw', lock=None, current_path=None):
+    if current_path is None:
+        current_path = set_dirs()
     cam, handle = init_cam(nCam, model)
     for n in range(nCapture):
         if lock:
@@ -221,10 +249,11 @@ def get_cam_handles(args):
 
 def startup(cam_handles, args):
     transfer_lock = mp.Lock()
+    current_path = set_dirs()
 
     # set writer and queue
     queue = mp.Queue()
-    writer_list = [Writer(queue, args.format) for n in range(args.writers)]
+    writer_list = [Writer(queue, args.format, current_path) for n in range(args.writers)]
 
     # set transfer
     ct = 0
