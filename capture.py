@@ -9,9 +9,6 @@ import psutil
 from PIL import Image
 from cv2 import cvtColor, imwrite
 import numpy as np
-#import netCDF4 as nc
-
-
 
 from model import AR0134, MT9N001, get_model
 
@@ -19,7 +16,6 @@ import ArducamSDK
 
 _PATH = os.path.dirname(os.path.realpath(__file__))
 RUN_PATH = os.path.join(_PATH, 'running.info')
-
 
 def set_dirs():
     parse_ = lambda x: os.path.basename(x).replace('flt_', '')
@@ -33,6 +29,17 @@ def set_dirs():
     except:
         pass
     return current_path
+
+def get_file_name(current_path, format_='tif', nCam=0):
+    """
+
+    :param format_: format file extension
+    :param nCam: cam position
+    :return: path to image-file
+    """
+    time_ = datetime.datetime.now().strftime('%Y%m%dT%H%M%S%fZ')
+    fname = 'img_{}_cam{}.{}'.format( time_,nCam, format_)
+    return os.path.join(current_path, fname)
 
 def convert_raw(cam, file_name, format_):
     with open(file_name, 'rb') as f:
@@ -51,38 +58,65 @@ def convert_np(model, img_format):
         img2 = cvtColor(array, cam.COLOR_BYTE2RGB)
         imwrite(np_file_.replace('npy', img_format), img2)
 
+def cam_write(cam, data, current_path, format_='npy', nCam=0, ):
+    image = Image.fromstring("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1)
+    file_name = get_file_name(current_path, format_, nCam)
+    if format_ == 'raw':
+        with open(file_name, 'wb') as f:
+            f.write(image.tostring())
+    else:
+        img = np.array(image)
+        if format_ == 'npy':
+            np.save(file_name, image)
+        else:
+            img2 = cvtColor(img, cam.COLOR_BYTE2RGB)
+            imwrite(file_name, img2)
+
+
+# Arducam camera functions
+# ------------------------
+def cam_init(nCam, model_str='AR0134'):
+    model_obj = get_model(model_str)
+    cam = model_obj(nCam)
+    handle = cam_open(cam)
+    cam.set_reg_options(handle)
+    return cam, handle
+
 def cam_open(cam):
     res, handle = ArducamSDK.Py_ArduCam_open(cam.cfg, cam.nCam)
+    print('AUTO-OPEN (cam{}): {}'.format(cam.nCam, res))
     try:
         assert res == cam.success
         cam.open = True
-        print('AUTO-OPEN: {},{}'.format(res, handle))
     except:
         print('Camera not open. Check permissions.')
         raise
-    return handle
-
-def cam_begin(cam, handle):
-    if ArducamSDK.Py_ArduCam_beginCapture(handle) == cam.success:
-        res = ArducamSDK.Py_ArduCam_capture(handle)
-    return res
-
-def cam_close(cam, handle):
-    ArducamSDK.Py_ArduCam_del(handle)
-    res = ArducamSDK.Py_ArduCam_endCapture(handle)
-    res = ArducamSDK.Py_ArduCam_close(handle)
+    res = ArducamSDK.Py_ArduCam_beginCapture(handle)
+    print('CAPTURE-TASK (cam{}): {}'.format(cam.nCam, res))
     try:
-        assert res == cam.success
-        cam.open = False
-        print('AUTO-CLOSE: {},{}'.format(res, handle))
-    except Exception as error:
-        print('Camera not closing. Check permissions.')
-        raise
+        assert  res == cam.success
+    except:
+        raise Exception("Cannot start capture task list")
+    #time.sleep(.03)
+    res = ArducamSDK.Py_ArduCam_capture(handle)
+    print('CAPTURE-TEST (cam{}): {}'.format(cam.nCam, res))
+    try:
+        assert  res == cam.success
+    except:
+        raise Exception("Cannot add capture task list")
+    time.sleep(.03)
     return handle
 
+def cam_capture(handle, ncam=0):
+    res = ArducamSDK.Py_ArduCam_capture(handle)
+    print('CAM-CAPTURE (cam{}): {}'.format(ncam, res))
+    try:
+        assert res == 0
+    except:
+        raise Exception('CAM-CAPTURE (cam{}); capture fail !!!'.format(ncam))
+    time.sleep(0.03)
 
 def cam_read(cam, handle):
-    # check data ready
     """
 
     :param cam: <Cam> Class object
@@ -97,44 +131,33 @@ def cam_read(cam, handle):
     # check data good
     try:
         assert len(data) >= cam.Width * cam.Height
-        #ArducamSDK.Py_ArduCam_del(handle)
+        ArducamSDK.Py_ArduCam_del(handle)
     except Exception as error:
         raise
     return Image.frombuffer("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1).tostring()
 
-def get_file_name(current_path, format_='tif', nCam=0):
-    """
+def cam_close(cam, handle):
+    # end capture task list
+    res = ArducamSDK.Py_ArduCam_endCapture(handle)
+    print('END-CAPTURE  (cam{}): {}'.format(cam.nCam, res))
+    try:
+        assert res == cam.success
+    except:
+        print("problem stopping capture task list :(")
+    # close cammera
+    res = ArducamSDK.Py_ArduCam_close(handle)
+    print('AUTO-CLOSE  (cam{}): {}'.format(cam.nCam, res))
+    try:
+        assert res == cam.success
+        cam.open = False
+    except Exception as error:
+        print('Camera not closing. Check permissions.')
+        raise
+    return handle
 
-    :param format_: format file extension
-    :param nCam: cam position
-    :return: path to image-file
-    """
-    time_ = datetime.datetime.now().strftime('%Y%m%dT%H%M%S%fZ')
-    fname = 'img_{}_cam{}.{}'.format( time_,nCam, format_)
-    return os.path.join(current_path, fname)
-
-def cam_write(cam, data, current_path, format_='npy', nCam=0, ):
-    image = Image.fromstring("L", (cam.Width, cam.Height), data, 'raw', "L", 0, 1)
-    file_name = get_file_name(current_path, format_, nCam)
-    img = np.array(image)
-    if format_ == 'npy':
-        np.save(file_name, image)
-    else:
-        img2 = cvtColor(img, cam.COLOR_BYTE2RGB)
-        imwrite(file_name, img2)
-
-def init_cam(nCam, model_str='AR0134'):
-    model_obj = get_model(model_str)
-    cam = model_obj(nCam)
-    handle = cam_open(cam)
-    cam.set_reg_options(handle)
-    begin_error = ArducamSDK.Py_ArduCam_beginCapture(handle)
-    assert begin_error == cam.success
-    time.sleep(.03)
-    return cam, handle
 
 # Threading
-
+#  --------
 class Writer(mp.Process):
 
     def __init__(self, queue, format, current_path):
@@ -160,6 +183,21 @@ class Writer(mp.Process):
         print('Stopping Writer: {}'.format(self.pid))
         self.exit.set()
 
+class Capture(mp.Process):
+
+    def __init__(self, cam, handle):
+        self.exit = mp.Event()
+
+        self.cam = cam
+        self.handle = handle
+        super(Capture, self).__init__()
+    def run(self):
+        print('CAM{}; capture running ... '),
+        while not self.exit.is_set():
+            cam_capture(self.handle, self.cam.nCam)
+    def stop(self):
+        print('Stopping Capture: {}'.format(self.pid))
+        self.exit.set()
 
 class Transfer(mp.Process):
 
@@ -177,28 +215,15 @@ class Transfer(mp.Process):
     def run(self):
         print('CAM{}; running'),
         while not self.exit.is_set():
-            #self.handle = init_cam(self.cam.nCam, model_str=self.cam.name)
-            try:
-                assert cam_begin(self.cam, self.handle) == self.cam.success
-            except:
-                print('Cam Failed to Begin!!')
-                raise
 
-            print('CAM{}; waiting for capture'.format(self.cam.nCam)),
 
-            assert ArducamSDK.Py_ArduCam_capture(self.handle) == self.cam.success
-            print('CAM{}; waiting for lock'.format(self.cam.nCam)),
+            print('CAM{}; starting read'.format(self.cam.nCam)),
+            data = cam_read(self.cam, self.handle)
+            self.ct += 1
+            print('Transfer Done')
+            tm_ = time.time() - self.time
+            print(tm_)
 
-            with self.transfer_lock:
-                print('CAM{}; got lock'.format(self.cam.nCam))
-
-                data = cam_read(self.cam, self.handle)
-                self.ct += 1
-                print('Transfer Done')
-                tm_ = time.time() - self.time
-                print(tm_)
-                res = ArducamSDK.Py_ArduCam_endCapture(self.handle)
-                res = ArducamSDK.Py_ArduCam_del(self.handle)
             print('CAM{}; Frame: {}; Elapsed: {}, FPS: {:g}, CNT: {}'.format(self.cam.nCam, self.ct, tm_, self.ct / tm_, self.ct))
             self.write_queue.put((self.cam, data, self.ct))
             # stop all
@@ -212,53 +237,50 @@ class Transfer(mp.Process):
         self.exit.set()
 
 
-def trigger_cam(cam, handle):
-    try:
-        assert cam_begin(cam, handle) == cam.success
-    except:
-        print('Cam Failed to Begin!!')
-        raise
-    avail_ = ArducamSDK.Py_ArduCam_availiable(handle)
-    print(avail_)
-    if  avail_ > 0:
-        data = cam_read(cam, handle)
-    return data
-
-def init_proc(l):
-    global lock
-    lock = l
-
-def capture(nCam, model=MT9N001, nCapture=1, format_='raw', lock=None, current_path=None):
+def capture(nCam, model=AR0134, nCapture=1, format_='raw', lock=None, current_path=None):
     if current_path is None:
         current_path = set_dirs()
-    cam, handle = init_cam(nCam, model)
-    for n in range(nCapture):
-        if lock:
-            lock.acquire()
-        data = trigger_cam(cam, handle)
-        print('_CAM{}'.format(nCam))
-        if lock:
-            lock.release()
-        cam_write(cam, data, format_, nCam)
-    cam_close(cam, handle)
+    cam, handle = cam_init(nCam, model)
+    try:
+        for n in range(nCapture):
+            #cam_capture(handle)
+            if lock:
+                lock.acquire()
+            data = cam_read(cam, handle)
+            print('_CAM{}'.format(nCam))
+            if lock:
+                lock.release()
+            cam_write(cam, data, current_path, format_, nCam)
+    finally:
+        cam_close(cam, handle)
 
 
 def get_cam_handles(args):
-    return [init_cam(n, model_str=args.model) for n in range(args.cameras)]
-
+    return [cam_init(n, model_str=args.model) for n in range(args.cameras)]
 
 def startup(cam_handles, args):
     transfer_lock = mp.Lock()
     current_path = set_dirs()
 
+    ct = 0
+
     # set writer and queue
     queue = mp.Queue()
     writer_list = [Writer(queue, args.format, current_path) for n in range(args.writers)]
 
-    # set transfer
-    ct = 0
+    # init capture
+    capture_list = [Capture(cam, handle) for cam, handle in cam_handles]
+
+    #init transfer
     transfer_list = [Transfer(cam, handle, transfer_lock, queue, ct, args.nexposure) for cam, handle in
                      cam_handles]
+
+    running = []
+    # start cam capture
+    [capture_.start() for capture_ in capture_list]
+    for capture_ in capture_list:
+        running.append(capture_.pid)
+        print('Capture: {}'.format(capture_.pid))
 
     # start data transfer
     [transfer.start() for transfer in transfer_list]
@@ -277,10 +299,11 @@ def startup(cam_handles, args):
     with open(RUN_PATH, 'w') as f:
         for line in running:
             f.write('{}\n'.format(line))
+    return capture_list, transfer_list, writer_list, queue
 
-    return transfer_list, writer_list, queue
-
-def shutdown(cam_handles, transfer_list, writer_list):
+def shutdown(cam_handles, capture_list, transfer_list, writer_list):
+    if capture_list:
+        [capture.stop() for capture in capture_list]
     if transfer_list:
         [transfer.stop() for transfer in transfer_list]
     [cam_close(cam, handle) for cam, handle in cam_handles]

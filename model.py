@@ -137,9 +137,7 @@ class AR0134(CAM):
         [0xffff, 0xffff]]
 
 
-_model = {'MT9N001': MT9N001,
-          'AR0134': AR0134}
-
+_model = {model.name: model for model in [MT9N001, AR0134]}
 def get_model(model_str):
     try:
         model_obj = _model[model_str.upper()]
