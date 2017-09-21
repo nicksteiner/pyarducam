@@ -1,24 +1,22 @@
 import os
 import sys
-import capture
-import model
 import time
 import argparse
 
+import capture
 
-
-def main_threaded():
+def main_threaded(args):
     cam_handles = capture.get_cam_handles(args)
     try:
         # startup
         capture_list, read_list, write_list, queue = capture.startup(cam_handles, args)
         while True:
             assert not all([write_.exit.is_set() for write_ in write_list])
-
     except:
         capture.shutdown(capture_list, read_list, write_list)
     finally:
         [capture.cam_shutdown(cam, handle) for cam, handle in cam_handles]
+
 
 def main(args):
 
@@ -32,7 +30,7 @@ def main(args):
         capture.convert_np(args.model, args.format)
 
     if ((not args.nocapture) | (args.force)) & (args.threaded):
-        main_threaded()
+        main_threaded(args)
     else:
         tm_ = time.time()
         ct = 0.
@@ -44,6 +42,7 @@ def main(args):
             tmC = time.time()
             print('CRT : {}'.format(1./(tm0-tmC)))
             print('FPS : {}'.format(ct/(tmC-tm_)))
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Arducam python wrapper")

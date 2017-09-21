@@ -88,8 +88,8 @@ class AR0134(CAM):
         # //[PLL_settings]
         [0x3028, 0x0010],  # //ROW_SPEED = 16
         [0x302A, 0x0010],  # //VT_PIX_CLK_DIV = 16
-        [0x302C, 0x0002],  # //VT_SYS_CLK_DIV = 1
-        [0x302E, 0x0002],  # //PRE_PLL_CLK_DIV = 2
+        [0x302C, 0x0001],  # //VT_SYS_CLK_DIV = 1
+        [0x302E, 0x0007],  # //PRE_PLL_CLK_DIV = 2
         [0x3030, 0x0028],  # //PLL_MULTIPLIER = 40
         [0x3032, 0x0000],  # //DIGITAL_BINNING = 0
         [0x30B0, 0x0080],  # //DIGITAL_TEST = 128

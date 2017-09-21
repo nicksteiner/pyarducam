@@ -5,7 +5,7 @@ import ctypes
 import os
 import cv2
 import time
-import Image
+from PIL import Image
 import argparse
 import numpy as np
 import thread as thread

@@ -11,7 +11,8 @@ import psutil
 from PIL import Image
 from cv2 import cvtColor, imwrite
 import numpy as np
-
+#from memory_profiler import profile
+#from pympler import tracker
 from model import AR0134, MT9N001, get_model
 
 import ArducamSDK
@@ -169,18 +170,26 @@ class Write(mp.Process):
         self.max = max
         super(Write, self).__init__()
 
+    #@profile
     def run(self):
         print('Writer Running: {}'.format(self.pid))
         while not self.exit.is_set():
+            time.sleep(.003)
+
             if not self.queue.empty():
+                #tr = tracker.SummaryTracker()
+
                 time0 = time.time()
                 cam, data = self.queue.get()
                 cam_write(cam, data, self.current_path, format_=self.format)
                 time1 = time.time()
-                delT = time1 - time0
-                delTT = time1 - self.time
                 self.ct.value += 1
-                print('CAM{} Frame: {}; Elapsed: {}, FPS: {:g}, CNT: {}'.format(cam.nCam, self.ct.value, delT, self.ct.value / delTT, self.ct.value))
+                info_ = {'Frame': self.ct.value, 'Elapsed': time1 - time0,
+                         'FPS': self.ct.value / (time1 - self.time), 'CAM': cam.nCam}
+                print('CAM{CAM} Frame: {Frame}; Elapsed: {Elapsed}, FPS: {FPS:g}'.format(**info_))
+                del data
+                #tr.print_diff()
+                # check if enough frames captured
                 if (self.ct.value >= self.max) & (self.max != 0):
                     print('Stopping Reader')
                     self.exit.set()
@@ -201,6 +210,7 @@ class Capture(Thread):
     def run(self):
         print('CAM{} capture; running ... '.format(self.cam.nCam))
         while not self.exit.is_set():
+            time.sleep(.003)
             time0 = time.time()
             res = ArducamSDK.Py_ArduCam_capture(self.handle)
             #print('CPS: {}'.format(1 / (time.time() - time0)))
@@ -220,13 +230,17 @@ class Read(Thread):
         self.handle = handle
         super(Read, self).__init__()
 
+    #@profile
     def run(self):
         print('CAM{} read; running'.format(self.cam.nCam))
         while not self.exit.is_set():
+            time.sleep(.003)
             if ArducamSDK.Py_ArduCam_availiable(self.handle) > 0:
                 res, data = ArducamSDK.Py_ArduCam_read(self.handle, self.cam.Width * self.cam.Height)
                 image = Image.frombuffer("L", (self.cam.Width, self.cam.Height), data, 'raw', "L", 0, 1)
                 self.write_queue.put((self.cam, image.tostring()))
+                del image
+                print('Write Queue Size: {}'.format(self.write_queue.qsize()))
 
     def stop(self):
         print('Stopping Read')
@@ -265,51 +279,26 @@ def get_cam_handles(args):
     return [cam_init(n, model_str=args.model) for n in range(args.cameras)]
 
 def startup(cam_handles, args):
+    # lock for multiple cameras
     transfer_lock = mp.Lock()
+    # set data paths
     current_path = set_dirs()
 
     ct = Value('i', 0)
 
-
     # set writer and queue
-    queue = Queue()
+    queue = Queue(maxsize=5)
     write_list = [Write(queue, args.format, current_path, ct, args.nexposure) for n in range(args.writers)]
 
     # init capture
     capture_list = [Capture(cam, handle) for cam, handle in cam_handles]
 
     #init transfer
-    read_list = [Read(cam, handle, transfer_lock, queue) for cam, handle in
-                     cam_handles]
+    read_list = [Read(cam, handle, transfer_lock, queue) for cam, handle in cam_handles]
     [capture_.start() for capture_ in capture_list]
     [read_.start() for read_ in read_list]
     [write_.start() for write_ in write_list]
 
-    """    running = []
-    # start cam capture
-    
-    for capture_ in capture_list:
-        running.append(capture_.pid)
-        print('Capture: {}'.format(capture_.pid))
-
-    # start data transfer
-    [transfer.start() for transfer in read_list]
-    running = []
-    for transfer in read_list:
-        running.append(transfer.pid)
-        print('Transfer: {}'.format(transfer.pid))
-
-    # start writers
-    [writer.start() for writer in writer_list]
-    for writer in writer_list:
-        running.append(writer.pid)
-        print('Writer: {}'.format(writer.pid))
-
-    # set current writers
-    with open(RUN_PATH, 'w') as f:
-        for line in running:
-            f.write('{}\n'.format(line))
-    """
     return capture_list, read_list, write_list, queue
 
 def shutdown(capture_list, read_list, write_list):
@@ -321,13 +310,14 @@ def shutdown(capture_list, read_list, write_list):
 
     if write_list:
         [write_.stop() for write_ in write_list]
-
+    print('Joining reads')
     [read_.join() for read_ in read_list]
+    print('Joining captures')
     [capture_.join()  for capture_  in capture_list]
-
+    print('Joining writes')
     [write_.join() for write_ in write_list]
 
-    #with open(RUN_PATH, 'w') as f: pass
+
 
 def stop():
     proc_ids = []
